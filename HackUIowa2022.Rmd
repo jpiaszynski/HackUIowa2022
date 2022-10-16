@@ -1,0 +1,331 @@
+---
+title: "HackUIowa2022: Engie Historical Dataset"
+author: "John Piaszynski"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+
+emfactor.natlgas = (53.06 + 1 + 0.1)
+emfactor.pellets = (31.875 + 32 + 4.2 + 67.94775)
+emfactor.oathulls = (32 + 4.2 + 118.17)
+emfactor.coal = (93.28 + 11 + 1.6)
+
+scfTOmmbtu.natlgas = 0.001026
+stonTOmmbtu.pellets = 20.89375
+stonTOmmbtu.oathulls = 8.25
+stonTOmmbtu.coal = 24.93
+
+natlgas.ui = read_xlsx("C:/Users/iowa_/Downloads/engie_hackuiowa_data.xlsx","Main Natural Gas",col_names=FALSE)
+colnames(natlgas.ui) = natlgas.ui[2,]
+natlgas.ui = natlgas.ui[-c(1,2,367),]
+natlgas.ui$MMBTU.UI.natlgas = as.numeric(natlgas.ui$SUM) * 1000 * scfTOmmbtu.natlgas
+natlgas.ui$EM.UI.Natlgas = natlgas.ui$MMBTU.UI.natlgas * emfactor.natlgas
+names(natlgas.ui)[1] = "Date"
+
+natlgas.oak = read_xlsx("C:/Users/iowa_/Downloads/engie_hackuiowa_data.xlsx","Oakdale Nat Gas")[-1,]
+natlgas.oak$EM.oak.natlgas = natlgas.oak$MMBTU * emfactor.natlgas
+names(natlgas.oak)[c(1,2)] = c("Date","MMBTU.oak.natlgas")
+
+pellets.blr10 = read_xlsx("C:/Users/iowa_/Downloads/engie_hackuiowa_data.xlsx","Blr 10 Pellets",col_names=FALSE)[-1,]
+colnames(pellets.blr10) = pellets.blr10[1,]
+pellets.blr10 = pellets.blr10[-1,]
+pellets.blr10$PP_CHS_B10WeighBelt_MvgAvg[24] = 0.217413785
+pellets.blr10$MMBTU.blr10.pellets = (as.numeric(pellets.blr10$PP_CHS_B10WeighBelt_MvgAvg) / 2) * stonTOmmbtu.pellets
+pellets.blr10$EM.pellets.blr10 = pellets.blr10$MMBTU.blr10.pellets * emfactor.pellets
+names(pellets.blr10)[1] = "Date"
+
+blr11 = read_xlsx("C:/Users/iowa_/Downloads/engie_hackuiowa_data.xlsx","Blr 11 Coal and Pellets","A1:C367",col_names=FALSE)[-1,]
+colnames(blr11) = blr11[1,]
+blr11 = blr11[-1,]
+blr11$PelletPropMMBTU.blr11 = ((as.numeric(blr11$`PP_SF-WIT-6044A`) * as.numeric(blr11$Pellet_Percent)) / 2) * stonTOmmbtu.pellets
+blr11$CoalPropMMBTU.blr11 = ((as.numeric(blr11$`PP_SF-WIT-6044A`) * (1-as.numeric(blr11$Pellet_Percent))) / 2) * stonTOmmbtu.coal
+blr11$EM.coal.blr11 = blr11$CoalPropMMBTU.blr11 * emfactor.coal
+blr11$EM.pellets.blr11 = blr11$PelletPropMMBTU.blr11 * emfactor.pellets
+names(blr11)[1] = "Date"
+
+blr11.oats = read_xlsx("C:/Users/iowa_/Downloads/engie_hackuiowa_data.xlsx","Blr 11 Oat Hulls",col_names=FALSE)[-1,]
+colnames(blr11.oats) = blr11.oats[1,]
+blr11.oats = blr11.oats[-1,]
+blr11.oats$mmbtu.oats = (as.numeric(blr11.oats$PP_BIO_Weight) / 2) * stonTOmmbtu.oathulls
+blr11.oats$EM.oats = blr11.oats$mmbtu.oats * emfactor.oathulls
+names(blr11.oats)[1] = "Date"
+
+summary.dat = left_join(natlgas.ui,natlgas.oak,by=c("Date" = "Date")) %>%
+                left_join(pellets.blr10,by=c("Date"="Date")) %>%
+                left_join(blr11,by=c("Date"="Date")) %>%
+                left_join(blr11.oats,by=c("Date"="Date"))
+
+summary.EM = summary.dat[,c(1,15,18,21,26,27,30)]
+summary.EM$EMtotal = summary.EM$EM.UI.Natlgas + summary.EM$EM.oak.natlgas + summary.EM$EM.pellets.blr10 + summary.EM$EM.coal.blr11 + summary.EM$EM.pellets.blr11 + summary.EM$EM.oats
+
+summary.mmbtu = summary.dat[,c(1,14,16,20,24,25,29)]
+summary.mmbtu$mmbtuTotal = summary.mmbtu$MMBTU.UI.natlgas + summary.mmbtu$MMBTU.oak.natlgas + summary.mmbtu$MMBTU.blr10.pellets + summary.mmbtu$PelletPropMMBTU.blr11 + summary.mmbtu$CoalPropMMBTU.blr11 + summary.mmbtu$mmbtu.oats
+
+summary.source = as.data.frame(summary.dat$Date)
+summary.source$natlgasMMBTU = summary.mmbtu$MMBTU.UI.natlgas + summary.mmbtu$MMBTU.oak.natlgas
+summary.source$natlgasMMBTU.prop = summary.source$natlgasMMBTU / summary.mmbtu$mmbtuTotal
+summary.source$pelletsMMBTU = summary.mmbtu$MMBTU.blr10.pellets + summary.mmbtu$PelletPropMMBTU.blr11
+summary.source$pelletsMMBTU.prop = summary.source$pelletsMMBTU / summary.mmbtu$mmbtuTotal
+summary.source$coalMMBTU = summary.mmbtu$CoalPropMMBTU.blr11
+summary.source$coalMMBTU.prop = summary.source$coalMMBTU / summary.mmbtu$mmbtuTotal
+summary.source$oatsMMBTU = summary.mmbtu$mmbtu.oats
+summary.source$oatsMMBTU.prop = summary.source$oatsMMBTU / summary.mmbtu$mmbtuTotal
+
+summary.source$natlgasEM = summary.EM$EM.UI.Natlgas + summary.EM$EM.oak.natlgas
+summary.source$natlgasEM.prop = summary.source$natlgasEM / summary.EM$EMtotal
+summary.source$pelletsEM = summary.EM$EM.pellets.blr10 + summary.EM$EM.pellets.blr11
+summary.source$pelletsEM.prop = summary.source$pelletsEM / summary.EM$EMtotal
+summary.source$coalEM = summary.EM$EM.coal.blr11
+summary.source$coalEM.prop = summary.source$coalEM / summary.EM$EMtotal
+summary.source$oatsEM = summary.EM$EM.oats
+summary.source$oatsEM.prop = summary.source$oatsEM / summary.EM$EMtotal
+
+#summary.props = summary.source[,c(1,6,7,8,9,11,13,15,17)] %>%
+summary.props = summary.source[,c(1,3,5,7,9,11,13,15,17)] %>%
+  pivot_longer(2:9,names_to="fuel_source",values_to="Proportion")
+
+summary.props$Measurement = rep(c("Volume","Volume","Volume","Volume","Pollutants","Pollutants","Pollutants","Pollutants"),365)
+summary.props$Measurement = factor(summary.props$Measurement,levels=c("Volume","Pollutants"))
+summary.props$fuel_source = rep(c("Natural Gas","Pellets","Coal","Oat Hulls"),730)
+summary.props$fuel_source = factor(summary.props$fuel_source,levels=c("Natural Gas","Pellets","Coal","Oat Hulls"))
+
+july.point = summary.props[1:8,]
+november.point = summary.props[801:808,]
+march.point = summary.props[1945:1952,]
+june.point = summary.props[2881:2888,]
+avg.set = group_by(summary.props[,-1],fuel_source,Measurement) %>% summarize(Proportion=mean(Proportion,na.rm=TRUE))
+
+main.pur = read_xlsx("C:/Users/iowa_/Downloads/engie_hackuiowa_data.xlsx",sheet="Main Purch El",range="A2:B367")
+colnames(main.pur) = c("Date","Main.pur")
+main.gen = read_xlsx("C:/Users/iowa_/Downloads/engie_hackuiowa_data.xlsx",sheet="Main Gen El",range="A2:B367")
+colnames(main.gen) = c("Date","Main.gen")
+oak.pur = read_xlsx("C:/Users/iowa_/Downloads/engie_hackuiowa_data.xlsx",sheet="Oakdale Purch El",range="A2:B367")
+colnames(oak.pur) = c("Date","Oak.pur")
+oak.gen = read_xlsx("C:/Users/iowa_/Downloads/engie_hackuiowa_data.xlsx",sheet="Oakdale Gen El",range="A2:E367")[,c(1,5)]
+colnames(oak.gen) = c("Date","Oak.gen")
+purVgen = left_join(main.pur,main.gen,by=c("Date"="Date")) %>% left_join(oak.pur,by=c("Date"="Date")) %>% left_join(oak.gen,by=c("Date"="Date"))
+purVgen$UItotal = purVgen$Main.pur + purVgen$Main.gen
+purVgen$OakdaleTotal = purVgen$Oak.pur + purVgen$Oak.gen
+purVgen$OverallTotal = purVgen$UItotal + purVgen$OakdaleTotal
+purVgen$main.prop.pur = purVgen$Main.pur / purVgen$UItotal
+purVgen$main.prop.gen = purVgen$Main.gen / purVgen$UItotal
+purVgen$oak.prop.pur = purVgen$Oak.pur / purVgen$OakdaleTotal
+purVgen$oak.prop.gen = purVgen$Oak.gen / purVgen$OakdaleTotal
+purVgen$combined.prop.pur = (purVgen$Main.pur + purVgen$Oak.pur) / purVgen$OverallTotal
+purVgen$combined.prop.gen = (purVgen$Main.gen + purVgen$Oak.gen) / purVgen$OverallTotal
+purVgen$combined.pur = purVgen$Main.pur + purVgen$Oak.pur
+purVgen$combined.gen = purVgen$Main.gen + purVgen$Oak.gen
+
+```
+## Total Usage
+
+#### Purchased vs Generated
+
+The following chart shows the total proportion of electricity generated across both campuses. The proportion is relatively low for the second half of 2021, but picks up markedly around January 2022.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+prop.gen.plot = ggplot(purVgen,aes(x=Date,y=combined.prop.gen))+geom_line()+theme_classic()
+prop.gen.plot + ggtitle("Proportion of Electricity Generated on Both Campuses Across Time")+ylab("Proportion")
+```
+
+#### Campus Comparison
+
+Proportion of energy generated, broken down by campus. Though it is much less consistent, the Oakdale campus typically produces a much larger percentage of its own energy.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+prop.gen = pivot_longer(purVgen[,c(1,10,12,14)],cols=c(2,3,4),names_to="Campus",values_to="Proportion")
+prop.gen$Campus = rep(c("Main","Oakdale","Combined"),365)
+ggplot(prop.gen,aes(x=Date,y=Proportion,color=Campus))+geom_line()+theme_classic()+
+  ggtitle("Comparison of Campuses on Proportion of Generated Electricity")+ylab("Proportion")
+```
+
+#### Purchased Energy and Emissions
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+purPlusEM = na.omit(left_join(purVgen[,c(1,15,16)],summary.EM[,c(1,8)],by="Date"))
+#cor(purPlusEM$combined.pur,purPlusEM$EMtotal)
+#cor(purPlusEM$combined.gen,purPlusEM$EMtotal)
+```
+
+The amount of purchased energy is not a strong predictor of overall emissions, indicating that little is gained or lost by shifting the ratio of purchased to generated electricity. Correlation between amount purchased and overall greenhouse gas emissions is `r round(cor(purPlusEM$combined.pur,purPlusEM$EMtotal),2)`. (Note that pollutant emissions are scaled down by a factor of 500).
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+purPlusEM = na.omit(left_join(purVgen[,c(1,15,16)],summary.EM[,c(1,8)],by="Date"))
+#cor(purPlusEM$combined.pur,purPlusEM$EMtotal)
+#cor(purPlusEM$combined.gen,purPlusEM$EMtotal)
+
+purPlusEM = left_join(purVgen[,c(1,15,16)],summary.EM[,c(1,8)],by="Date")
+purPlusEM$EMtotal = purPlusEM$EMtotal / 500
+purPlusEM = pivot_longer(purPlusEM[,-3],cols=c(2,3),names_to="Metric",values_to="Total")
+purPlusEM$Metric = rep(c("Purchased Electricity","Greenhouse Gas Emissions"),365)
+ggplot(purPlusEM,aes(x=Date,y=Total,color=Metric))+geom_line()+theme_classic()+
+  ggtitle("Total Amount of Energy Purchased and Greenhouse Gas Emissions")
+```
+
+Same comparison, using amount of generated electricity. (Pollutant emissions scaled down by factor of 5000).
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+genPlusEM = left_join(purVgen[,c(1,15,16)],summary.EM[,c(1,8)],by="Date")
+genPlusEM$EMtotal = genPlusEM$EMtotal / 5000
+genPlusEM = pivot_longer(genPlusEM[,-2],cols=c(2,3),names_to="Metric",values_to="Total")
+genPlusEM$Metric = rep(c("Generated Electricity","Greenhouse Gas Emissions"),365)
+ggplot(genPlusEM,aes(x=Date,y=Total,color=Metric))+geom_line()+theme_classic()+
+  ggtitle("Total Amount of Energy Generated and Greenhouse Gas Emissions")
+```
+
+## Fuel Source
+
+#### Breakdown of Fuel Source
+
+Proportion of energy produced by each fuel source across time. In the warmer months, load is shared roughly equally, but during the winter months, natural gas becomes the dominant fuel source. Shown here are a sample of values across time.
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+breakdown.volume = summary.props[which(summary.props$Measurement == "Volume"),]
+sample = c()
+for (i in seq(10,360,10)){
+  sample = c(sample,seq(8*i-8,8*i))
+}
+breakdown.volume = na.omit(breakdown.volume[sample,])
+ggplot(breakdown.volume,aes(x=breakdown.volume$`summary.dat$Date`,y=Proportion,color=fuel_source))+geom_line()+ggtitle("Sample of Energy Production by Fuel Source Over Time")+xlab("Date")+theme_classic()
+```
+
+#### Fuel Source and Greenhouse Gas Emissions
+
+Proportion of greenhouse gas emissions by fuel source. Natural gas is still responsible for most of the emissions during the winter months (as would be expected given its higher proportion), but during the warmer months, other sources are clearly worse polluters, despite their roughly equal use.
+
+```{r,echo=FALSE,warning=FALSE,message=FALSE}
+breakdown.EM = summary.props[which(summary.props$Measurement == "Pollutants"),]
+sample = c()
+for (i in seq(10,360,10)){
+  sample = c(sample,seq(8*i-8,8*i))
+}
+breakdown.EM = na.omit(breakdown.EM[sample,])
+ggplot(breakdown.EM,aes(x=breakdown.EM$`summary.dat$Date`,y=Proportion,color=fuel_source))+geom_line()+ggtitle("Sample of Greenhouse Gas Emissions by Fuel Source Over Time")+xlab("Date")+theme_classic()
+```
+
+#### Disproportionate Pollutants
+
+Here the proportions of the total volume of emissions are compared to the proportion of pollutants released by each fuel source. Natural gas is a disproportionately clean source compared to the others, having a lower proportion of greenhouse gas emissions relative to total volume of emissions produced.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+ggplot(avg.set,aes(x=Measurement,y=Proportion,fill=Measurement))+
+  facet_wrap(~fuel_source,ncol=4)+
+  geom_col()+
+  ggtitle("Comparison of Average Total Emission Volume and Pollutant Proportion ")+
+  scale_y_continuous(breaks=seq(0,0.6,0.05))+
+  scale_fill_manual(values=c("#99CCFF","#003366"))+
+  theme_classic()
+```
+
+These relationships are relatively consistent across time, though the magnitudes fluctuate. The following are a snapshot of different days during the year.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+ggplot(july.point,aes(x=Measurement,y=Proportion,fill=Measurement))+
+  facet_wrap(~fuel_source,ncol=4)+
+  geom_col()+
+  ggtitle("Total Emission Volume and Pollutant Proportion for 07-01-2021")+
+  scale_y_continuous(breaks=seq(0,0.45,0.05))+
+  scale_fill_manual(values=c("#99CCFF","#003366"))+
+  theme_classic()
+```
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+ggplot(november.point,aes(x=Measurement,y=Proportion,fill=Measurement))+
+  facet_wrap(~fuel_source,ncol=4)+
+  geom_col()+
+  ggtitle("Total Emission Volume and Pollutant Proportion for 11-09-2021")+
+  scale_y_continuous(breaks=seq(0,0.7,0.05))+
+  scale_fill_manual(values=c("#99CCFF","#003366"))+
+  theme_classic()
+```
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+ggplot(march.point,aes(x=Measurement,y=Proportion,fill=Measurement))+
+  facet_wrap(~fuel_source,ncol=4)+
+  geom_col()+
+  ggtitle("Total Emission Volume and Pollutant Proportion for 03-01-2021")+
+  scale_y_continuous(breaks=seq(0,0.6,0.05))+
+  scale_fill_manual(values=c("#99CCFF","#003366"))+
+  theme_classic()
+```
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+ggplot(june.point,aes(x=Measurement,y=Proportion,fill=Measurement))+
+  facet_wrap(~fuel_source,ncol=4)+
+  geom_col()+
+  ggtitle("Total Emission Volume and Pollutant Proportion for 06-26-2022")+
+  scale_y_continuous(breaks=seq(0,0.7,0.05))+
+  scale_fill_manual(values=c("#99CCFF","#003366"))+
+  theme_classic()
+```
+
+## Correlation between Fuel Source and Emissions
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+summary.mmbtu$natlgas = summary.mmbtu$MMBTU.UI.natlgas + summary.mmbtu$MMBTU.oak.natlgas
+summary.mmbtu$pellets = summary.mmbtu$MMBTU.blr10.pellets + summary.mmbtu$PelletPropMMBTU.blr11
+
+sources = na.omit(left_join(summary.EM[,c(1,8)],summary.mmbtu[,c(1,9,10,6,7,8)],by="Date"))
+
+```
+
+Association between total amount of natural gas used alongside total greenhouse gas emissions. Greater use of natural gas is associated with a reduction in greenhouse gas emissions, with a correlation of `r round(cor(sources$EMtotal,sources$natlgas),2)`. Pollutants scaled down by a factor of 200.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+summary.mmbtu$natlgas = summary.mmbtu$MMBTU.UI.natlgas + summary.mmbtu$MMBTU.oak.natlgas
+summary.mmbtu$pellets = summary.mmbtu$MMBTU.blr10.pellets + summary.mmbtu$PelletPropMMBTU.blr11
+
+sources = na.omit(left_join(summary.EM[,c(1,8)],summary.mmbtu[,c(1,9,10,6,7,8)],by="Date"))
+
+sources$EMtotal = sources$EMtotal / 200
+sources.long = pivot_longer(sources,cols=2:6,names_to="Source",values_to="Volume")
+sources.long$Source = rep(c("Greenhouse Gas Emissions","Natural Gas","Pellets","Coal","Oats"),364)
+ggplot(sources.long[which(sources.long$Source %in% c("Natural Gas","Greenhouse Gas Emissions")),],aes(x=Date,y=Volume,color=Source))+geom_line()+ggtitle("Greenhouse Gas Emissions and Natural Gas Use")
+```
+
+Association between Pellet use and greenhouse gas emissions. The correlation between the two is `r cor(sources$EMtotal,sources$pellets)`. Pollutants scaled down by 250.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+sources = na.omit(left_join(summary.EM[,c(1,8)],summary.mmbtu[,c(1,9,10,6,7,8)],by="Date"))
+
+sources$EMtotal = sources$EMtotal / 250
+sources.long = pivot_longer(sources,cols=2:6,names_to="Source",values_to="Volume")
+sources.long$Source = rep(c("Greenhouse Gas Emissions","Natural Gas","Pellets","Coal","Oats"),364)
+ggplot(sources.long[which(sources.long$Source %in% c("Pellets","Greenhouse Gas Emissions")),],aes(x=Date,y=Volume,color=Source))+geom_line()+ggtitle("Greenhouse Gas Emissions and Pellet Use")
+```
+
+Coal use and greenhouse gas emissions. Correlation is `r cor(sources$EMtotal,sources$CoalPropMMBTU.blr11)`. Pollutants scaled down by 250.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+sources = na.omit(left_join(summary.EM[,c(1,8)],summary.mmbtu[,c(1,9,10,6,7,8)],by="Date"))
+
+sources$EMtotal = sources$EMtotal / 250
+sources.long = pivot_longer(sources,cols=2:6,names_to="Source",values_to="Volume")
+sources.long$Source = rep(c("Greenhouse Gas Emissions","Natural Gas","Pellets","Coal","Oats"),364)
+ggplot(sources.long[which(sources.long$Source %in% c("Coal","Greenhouse Gas Emissions")),],aes(x=Date,y=Volume,color=Source))+geom_line()+ggtitle("Greenhouse Gas Emissions and Coal Use")
+```
+
+Oat hull use and greenhouse gas emissions. Correlation is `r cor(sources$EMtotal,sources$mmbtu.oats)`. Pollutants scaled down by a factor of 300.
+
+```{r,echo=FALSE,message=FALSE,warning=FALSE}
+sources = na.omit(left_join(summary.EM[,c(1,8)],summary.mmbtu[,c(1,9,10,6,7,8)],by="Date"))
+
+sources$EMtotal = sources$EMtotal / 300
+sources.long = pivot_longer(sources,cols=2:6,names_to="Source",values_to="Volume")
+sources.long$Source = rep(c("Greenhouse Gas Emissions","Natural Gas","Pellets","Coal","Oats"),364)
+ggplot(sources.long[which(sources.long$Source %in% c("Oats","Greenhouse Gas Emissions")),],aes(x=Date,y=Volume,color=Source))+geom_line()+ggtitle("Greenhouse Gas Emissions and Oat Hull Use")
+```
+
+
